@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://default:GXUiSqc8O2YV9HU7OYmwSEWKbZ3s8Eya@redis-16670.c262.us-east-1-3.ec2.redns.redis-cloud.com:16670
+    volumes:
+      - ./backend:/app
+    restart: always
