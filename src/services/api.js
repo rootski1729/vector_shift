@@ -1,294 +1,147 @@
+// src/services/api.js
 import axios from 'axios';
 
-const instance = axios.create({
-  baseURL: 'http://localhost:3000/api',
+const BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3000/api';
+
+// Create axios instance
+const api = axios.create({
+  baseURL: BASE_URL,
+  timeout: 30000,
 });
 
-instance.interceptors.request.use(config => {
-  const token = localStorage.getItem('adminToken');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
-
-export { instance };
-// src/services/api.js
-class ApiService {
-  constructor() {
-    this.baseURL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3000/api';
-    this.timeout = 30000; // 30 seconds
-  }
-
-  // Get auth token from localStorage
-  getAuthToken() {
-    return localStorage.getItem('adminToken');
-  }
-
-  // Set auth token
-  setAuthToken(token) {
-    localStorage.setItem('adminToken', token);
-  }
-
-  // Remove auth token
-  clearAuthToken() {
-    localStorage.removeItem('adminToken');
-  }
-
-  // Generic request method
-  async request(endpoint, options = {}) {
-    const url = `${this.baseURL}${endpoint}`;
-    const token = this.getAuthToken();
-
-    const config = {
-      timeout: this.timeout,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
-        ...options.headers,
-      },
-      ...options,
-    };
-
-    // Remove Content-Type for FormData
-    if (options.body instanceof FormData) {
-      delete config.headers['Content-Type'];
+// Request interceptor
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('adminToken');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
     }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-
-      const response = await fetch(url, {
-        ...config,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          this.clearAuthToken();
-          window.location.href = '/login';
-          throw new Error('Unauthorized');
-        }
-        
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      if (error.name === 'AbortError') {
-        throw new Error('Request timeout');
-      }
-      throw error;
+// Response interceptor
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('adminToken');
+      window.location.href = '/login';
     }
+    return Promise.reject(error);
   }
+);
 
-  // GET request
-  async get(endpoint, params = {}) {
-    const searchParams = new URLSearchParams(params);
-    const url = searchParams.toString() ? `${endpoint}?${searchParams}` : endpoint;
-    
-    return this.request(url, {
-      method: 'GET',
-    });
-  }
-
-  // POST request
-  async post(endpoint, data = {}) {
-    return this.request(endpoint, {
-      method: 'POST',
-      body: data instanceof FormData ? data : JSON.stringify(data),
-    });
-  }
-
-  // PUT request
-  async put(endpoint, data = {}) {
-    return this.request(endpoint, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  // DELETE request
-  async delete(endpoint) {
-    return this.request(endpoint, {
-      method: 'DELETE',
-    });
-  }
-
-  // PATCH request
-  async patch(endpoint, data = {}) {
-    return this.request(endpoint, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  }
-}
-
-// API endpoints organized by feature
-export class AdminAPI extends ApiService {
+class AdminAPI {
   // Authentication
   async login(credentials) {
-    return this.post('/admin/login', credentials);
-  }
-
-  async logout() {
-    this.clearAuthToken();
-    return Promise.resolve();
+    const response = await api.post('/admin/login', credentials);
+    if (response.data.success) {
+      localStorage.setItem('adminToken', response.data.data.token);
+    }
+    return response.data;
   }
 
   // Content Management
   async getContent(params = {}) {
-    return this.get('/admin/content', params);
+    const response = await api.get('/admin/content', { params });
+    return response.data.data;
   }
 
   async createContent(data) {
-    return this.post('/admin/content', data);
+    const response = await api.post('/admin/content', data);
+    return response.data;
   }
 
-  async updateContent(contentId, data) {
-    return this.put(`/admin/content/${contentId}`, data);
+  async updateContent(id, data) {
+    const response = await api.put(`/admin/content/${id}`, data);
+    return response.data;
   }
 
-  async deleteContent(contentId, options = {}) {
-    return this.delete(`/admin/content/${contentId}`, {
-      body: JSON.stringify(options),
-    });
+  async deleteContent(id) {
+    const response = await api.delete(`/admin/content/${id}`);
+    return response.data;
   }
 
-  async publishContent(contentId) {
-    return this.post(`/admin/content/${contentId}/publish`);
+  async bulkUpdateContent(data) {
+    const response = await api.put('/admin/content/bulk-update', data);
+    return response.data;
   }
 
-  async updateFeedSettings(contentId, settings) {
-    return this.put(`/admin/content/${contentId}/feed-settings`, settings);
+  async publishContent(id) {
+    const response = await api.post(`/admin/content/${id}/publish`);
+    return response.data;
   }
 
-  async bulkUpdateContent(contentIds, updates) {
-    return this.put('/admin/content/bulk-update', { contentIds, updates });
+  async updateFeedSettings(id, settings) {
+    const response = await api.put(`/admin/content/${id}/feed-settings`, settings);
+    return response.data;
   }
 
   // Video Upload
-  async uploadVideo(formData, onProgress = null) {
-    const endpoint = '/admin/upload-video';
-    const url = `${this.baseURL}${endpoint}`;
-    const token = this.getAuthToken();
-
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-
-      // Track upload progress
-      if (onProgress) {
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const percentComplete = (e.loaded / e.total) * 100;
-            onProgress(percentComplete);
-          }
-        });
-      }
-
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            resolve(JSON.parse(xhr.responseText));
-          } catch (e) {
-            reject(new Error('Invalid JSON response'));
-          }
-        } else {
-          reject(new Error(`Upload failed: ${xhr.statusText}`));
+  async uploadVideo(formData, onProgress) {
+    const response = await api.post('/admin/upload-video', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (progressEvent) => {
+        if (onProgress) {
+          const progress = (progressEvent.loaded / progressEvent.total) * 100;
+          onProgress(Math.round(progress));
         }
-      };
-
-      xhr.onerror = () => reject(new Error('Network error'));
-      xhr.ontimeout = () => reject(new Error('Upload timeout'));
-
-      xhr.open('POST', url);
-      xhr.timeout = 300000; // 5 minutes for file uploads
-      
-      if (token) {
-        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-      }
-
-      xhr.send(formData);
+      },
     });
+    return response.data;
   }
 
-  async batchUploadVideos(formData, onProgress = null) {
-    return this.uploadVideo(formData, onProgress);
+  async uploadThumbnail(episodeId, formData) {
+    const response = await api.post(`/admin/upload-thumbnail/${episodeId}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
   }
 
   // Analytics
-  async getPlatformAnalytics(params = {}) {
-    return this.get('/admin/analytics/platform', params);
+  async getPlatformAnalytics() {
+    const response = await api.get('/admin/analytics/platform');
+    return response.data.data;
   }
 
-  async getContentAnalytics(contentId, params = {}) {
-    return this.get(`/admin/content/${contentId}/analytics`, params);
+  async getContentAnalytics(id) {
+    const response = await api.get(`/admin/content/${id}/analytics`);
+    return response.data.data;
   }
 
   async getRealTimeAnalytics() {
-    return this.get('/admin/analytics/realtime');
+    const response = await api.get('/admin/analytics/realtime');
+    return response.data.data;
   }
 
-  async generateReport(params = {}) {
-    return this.get('/admin/analytics/report', params);
-  }
-
-  // System Management
+  // System
   async getSystemHealth() {
-    return this.get('/admin/system/health');
-  }
-
-  async getGCPHealth() {
-    return this.get('/admin/system/gcp-health');
+    const response = await api.get('/admin/system/health');
+    return response.data.data;
   }
 
   async getStorageStats() {
-    return this.get('/admin/storage/stats');
-  }
-
-  async getCacheStats() {
-    return this.get('/admin/cache/stats');
+    const response = await api.get('/admin/storage/stats');
+    return response.data.data;
   }
 
   async clearCache() {
-    return this.post('/admin/cache/clear');
+    const response = await api.post('/admin/cache/clear');
+    return response.data;
   }
 
-  async warmCache() {
-    return this.post('/admin/cache/warm');
-  }
-
-  // User Management (mock endpoints - extend based on your backend)
+  // User Management (mock endpoints)
   async getUsers(params = {}) {
-    return this.get('/admin/users', params);
+    const response = await api.get('/users/active/count', { params });
+    return response.data.data || [];
   }
 
-  async getUserById(userId) {
-    return this.get(`/admin/users/${userId}`);
-  }
-
-  async updateUserStatus(userId, status) {
-    return this.put(`/admin/users/${userId}/status`, { status });
-  }
-
-  async getUserAnalytics(userId, params = {}) {
-    return this.get(`/admin/users/${userId}/analytics`, params);
-  }
-
-  // Settings
-  async getSettings() {
-    return this.get('/admin/settings');
-  }
-
-  async updateSettings(settings) {
-    return this.put('/admin/settings', settings);
+  async getUserById(id) {
+    const response = await api.get(`/users/${id}`);
+    return response.data.data;
   }
 }
 
-// Create singleton instance
-export const adminAPI = new AdminAPI();
-
-// Export both class and instance
-export default adminAPI;
+export default new AdminAPI();
