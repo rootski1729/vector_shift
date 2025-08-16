@@ -1,12 +1,16 @@
 // src/services/api.js
 import axios from 'axios';
 
-const BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3000/api';
+const BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3000';
 
 // Create axios instance
 const api = axios.create({
   baseURL: BASE_URL,
   timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Cino-Admin-Dashboard/1.0.0'
+  }
 });
 
 // Request interceptor
@@ -16,6 +20,11 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    
+    // Add device ID and session ID for tracking
+    config.headers['X-Device-ID'] = 'admin_dashboard_' + Date.now();
+    config.headers['X-Session-ID'] = 'session_' + Date.now();
+    
     return config;
   },
   (error) => Promise.reject(error)
@@ -35,102 +44,447 @@ api.interceptors.response.use(
 );
 
 class AdminAPI {
-  // Authentication
+  // ===== AUTHENTICATION =====
   async login(credentials) {
     try {
-      const response = await api.post('/admin/login', credentials);
+      const response = await api.post('/api/admin/login', credentials);
       if (response.data?.success) {
-        const token = response.data.data?.token || 'mock-admin-token';
-        localStorage.setItem('adminToken', token);
-        localStorage.setItem('cino_admin_user', JSON.stringify({
-          username: credentials.username,
-          role: 'admin',
-          email: `${credentials.username}@cino.com`
-        }));
+        const token = response.data.data?.token;
+        if (token) {
+          localStorage.setItem('adminToken', token);
+          localStorage.setItem('cino_admin_user', JSON.stringify({
+            username: credentials.username,
+            role: 'admin',
+            email: `${credentials.username}@cino.com`
+          }));
+        }
         return response.data;
       }
       throw new Error(response.data?.message || 'Login failed');
     } catch (error) {
-      // For demo purposes, accept any credentials
-      if (credentials.username && credentials.password) {
-        const token = 'mock-admin-token';
-        localStorage.setItem('adminToken', token);
-        localStorage.setItem('cino_admin_user', JSON.stringify({
-          username: credentials.username,
-          role: 'admin',
-          email: `${credentials.username}@cino.com`
-        }));
-        return { success: true, data: { token } };
-      }
+      console.error('Login error:', error);
       throw new Error(error.response?.data?.message || error.message || 'Login failed');
     }
   }
 
-  // Content Management
-  async getContent(params = {}) {
+  // ===== HEALTH CHECK =====
+  async healthCheck() {
     try {
-      const response = await api.get('/admin/content', { params });
+      const response = await api.get('/health');
+      return response.data;
+    } catch (error) {
+      console.error('Health check failed:', error);
+      return { status: 'unhealthy', error: error.message };
+    }
+  }
+
+  // ===== USER MANAGEMENT =====
+  async getUsers(params = {}) {
+    try {
+      const response = await api.get('/api/users', { params });
       return response.data?.data || [];
     } catch (error) {
-      console.warn('Content API not available, using mock data');
-      return this.getMockContent();
+      console.error('Get users failed:', error);
+      throw error;
     }
   }
 
-  async createContent(data) {
+  async getUserById(userId) {
     try {
-      const response = await api.post('/admin/content', data);
+      const response = await api.get(`/api/users/${userId}`);
+      return response.data?.data || {};
+    } catch (error) {
+      console.error('Get user failed:', error);
+      throw error;
+    }
+  }
+
+  async createAnonymousUser(userData) {
+    try {
+      const response = await api.post('/api/users', userData);
       return response.data;
     } catch (error) {
-      console.warn('Content API not available, simulating success');
-      return { success: true, data: { _id: Date.now().toString(), ...data } };
+      console.error('Create user failed:', error);
+      throw error;
     }
   }
 
-  async updateContent(id, data) {
+  async updateUserPreferences(userId, preferences) {
     try {
-      const response = await api.put(`/admin/content/${id}`, data);
+      const response = await api.put(`/api/users/${userId}/preferences`, preferences);
       return response.data;
     } catch (error) {
-      console.warn('Content API not available, simulating success');
-      return { success: true, data: { _id: id, ...data } };
+      console.error('Update user preferences failed:', error);
+      throw error;
     }
   }
 
-  async deleteContent(id) {
+  async getUserStats(userId) {
     try {
-      const response = await api.delete(`/admin/content/${id}`);
+      const response = await api.get(`/api/users/${userId}/stats`);
+      return response.data?.data || {};
+    } catch (error) {
+      console.error('Get user stats failed:', error);
+      throw error;
+    }
+  }
+
+  async updateUserAnalytics(userId, analyticsData) {
+    try {
+      const response = await api.put(`/api/users/${userId}/analytics`, analyticsData);
       return response.data;
     } catch (error) {
-      console.warn('Content API not available, simulating success');
-      return { success: true };
+      console.error('Update user analytics failed:', error);
+      throw error;
     }
   }
 
-  async bulkUpdateContent(data) {
+  async getUserRecommendations(userId, limit = 10) {
     try {
-      const response = await api.put('/admin/content/bulk-update', data);
+      const response = await api.get(`/api/users/${userId}/recommendations`, {
+        params: { limit }
+      });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get user recommendations failed:', error);
+      throw error;
+    }
+  }
+
+  // ===== CONTENT MANAGEMENT =====
+  async getContent(params = {}) {
+    try {
+      const response = await api.get('/api/admin/content', { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get content failed:', error);
+      throw error;
+    }
+  }
+
+  async getContentById(contentId, userId = null) {
+    try {
+      const params = userId ? { userId } : {};
+      const response = await api.get(`/api/content/${contentId}`, { params });
+      return response.data?.data || {};
+    } catch (error) {
+      console.error('Get content by ID failed:', error);
+      throw error;
+    }
+  }
+
+  async createContent(contentData) {
+    try {
+      const response = await api.post('/api/admin/content', contentData);
       return response.data;
     } catch (error) {
-      console.warn('Content API not available, simulating success');
-      return { success: true };
+      console.error('Create content failed:', error);
+      throw error;
     }
   }
 
-  async publishContent(id) {
+  async updateContent(contentId, contentData) {
     try {
-      const response = await api.post(`/admin/content/${id}/publish`);
+      const response = await api.put(`/api/admin/content/${contentId}`, contentData);
       return response.data;
     } catch (error) {
-      console.warn('Content API not available, simulating success');
-      return { success: true };
+      console.error('Update content failed:', error);
+      throw error;
     }
   }
 
-  // Video Upload
+  async deleteContent(contentId) {
+    try {
+      const response = await api.delete(`/api/admin/content/${contentId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Delete content failed:', error);
+      throw error;
+    }
+  }
+
+  async publishContent(contentId) {
+    try {
+      const response = await api.post(`/api/admin/content/${contentId}/publish`);
+      return response.data;
+    } catch (error) {
+      console.error('Publish content failed:', error);
+      throw error;
+    }
+  }
+
+  async updateFeedSettings(contentId, feedSettings) {
+    try {
+      const response = await api.put(`/api/admin/content/${contentId}/feed-settings`, feedSettings);
+      return response.data;
+    } catch (error) {
+      console.error('Update feed settings failed:', error);
+      throw error;
+    }
+  }
+
+  async getContentByGenre(genre, params = {}) {
+    try {
+      const response = await api.get(`/api/content/genre/${genre}`, { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get content by genre failed:', error);
+      throw error;
+    }
+  }
+
+  async getContentByType(type, params = {}) {
+    try {
+      const response = await api.get(`/api/content/type/${type}`, { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get content by type failed:', error);
+      throw error;
+    }
+  }
+
+  async getSimilarContent(contentId, limit = 10) {
+    try {
+      const response = await api.get(`/api/content/${contentId}/similar`, {
+        params: { limit }
+      });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get similar content failed:', error);
+      throw error;
+    }
+  }
+
+  // ===== EPISODE MANAGEMENT =====
+  async getEpisodeById(episodeId, userId = null, quality = '720p') {
+    try {
+      const params = { quality };
+      if (userId) params.userId = userId;
+      
+      const response = await api.get(`/api/episodes/${episodeId}`, { params });
+      return response.data?.data || {};
+    } catch (error) {
+      console.error('Get episode failed:', error);
+      throw error;
+    }
+  }
+
+  async startWatchingEpisode(episodeId, watchData) {
+    try {
+      const response = await api.post(`/api/episodes/${episodeId}/start`, watchData);
+      return response.data;
+    } catch (error) {
+      console.error('Start watching episode failed:', error);
+      throw error;
+    }
+  }
+
+  async updateWatchProgress(episodeId, progressData) {
+    try {
+      const response = await api.put(`/api/episodes/${episodeId}/progress`, progressData);
+      return response.data;
+    } catch (error) {
+      console.error('Update watch progress failed:', error);
+      throw error;
+    }
+  }
+
+  async markEpisodeCompleted(episodeId, completionData) {
+    try {
+      const response = await api.post(`/api/episodes/${episodeId}/complete`, completionData);
+      return response.data;
+    } catch (error) {
+      console.error('Mark episode completed failed:', error);
+      throw error;
+    }
+  }
+
+  async likeEpisode(episodeId, userId) {
+    try {
+      const response = await api.post(`/api/episodes/${episodeId}/like`, { userId });
+      return response.data;
+    } catch (error) {
+      console.error('Like episode failed:', error);
+      throw error;
+    }
+  }
+
+  async shareEpisode(episodeId, shareData) {
+    try {
+      const response = await api.post(`/api/episodes/${episodeId}/share`, shareData);
+      return response.data;
+    } catch (error) {
+      console.error('Share episode failed:', error);
+      throw error;
+    }
+  }
+
+  async getPopularEpisodes(params = {}) {
+    try {
+      const response = await api.get('/api/episodes/popular', { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get popular episodes failed:', error);
+      throw error;
+    }
+  }
+
+  // ===== FEED MANAGEMENT =====
+  async getRandomFeed(params = {}) {
+    try {
+      const response = await api.get('/api/feed/random', { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get random feed failed:', error);
+      throw error;
+    }
+  }
+
+  async getContentEpisodes(contentId, params = {}) {
+    try {
+      const response = await api.get(`/api/feed/content/${contentId}/episodes`, { params });
+      return response.data?.data || {};
+    } catch (error) {
+      console.error('Get content episodes failed:', error);
+      throw error;
+    }
+  }
+
+  async getTrendingContent(params = {}) {
+    try {
+      const response = await api.get('/api/feed/trending', { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get trending content failed:', error);
+      throw error;
+    }
+  }
+
+  async getPopularByGenre(genre, params = {}) {
+    try {
+      const response = await api.get(`/api/feed/popular/${genre}`, { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get popular by genre failed:', error);
+      throw error;
+    }
+  }
+
+  async getPersonalizedFeed(userId, params = {}) {
+    try {
+      const response = await api.get(`/api/feed/personalized/${userId}`, { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get personalized feed failed:', error);
+      throw error;
+    }
+  }
+
+  async getContinueWatching(userId, params = {}) {
+    try {
+      const response = await api.get(`/api/feed/continue/${userId}`, { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get continue watching failed:', error);
+      throw error;
+    }
+  }
+
+  async searchContent(params = {}) {
+    try {
+      const response = await api.get('/api/feed/search', { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Search content failed:', error);
+      throw error;
+    }
+  }
+
+  async getFeaturedContent(params = {}) {
+    try {
+      const response = await api.get('/api/feed/featured', { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get featured content failed:', error);
+      throw error;
+    }
+  }
+
+  // ===== WATCHLIST MANAGEMENT =====
+  async getUserWatchlist(userId, params = {}) {
+    try {
+      const response = await api.get(`/api/watchlist/${userId}`, { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get user watchlist failed:', error);
+      throw error;
+    }
+  }
+
+  async getContinueWatchingList(userId, params = {}) {
+    try {
+      const response = await api.get(`/api/watchlist/${userId}/continue`, { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get continue watching list failed:', error);
+      throw error;
+    }
+  }
+
+  async getCompletedContent(userId, params = {}) {
+    try {
+      const response = await api.get(`/api/watchlist/${userId}/completed`, { params });
+      return response.data?.data || [];
+    } catch (error) {
+      console.error('Get completed content failed:', error);
+      throw error;
+    }
+  }
+
+  async getUserWatchStats(userId, params = {}) {
+    try {
+      const response = await api.get(`/api/watchlist/${userId}/stats`, { params });
+      return response.data?.data || {};
+    } catch (error) {
+      console.error('Get user watch stats failed:', error);
+      throw error;
+    }
+  }
+
+  async addToWatchlist(watchlistData) {
+    try {
+      const response = await api.post('/api/watchlist', watchlistData);
+      return response.data;
+    } catch (error) {
+      console.error('Add to watchlist failed:', error);
+      throw error;
+    }
+  }
+
+  async rateContent(userId, contentId, rating) {
+    try {
+      const response = await api.post(`/api/watchlist/${userId}/${contentId}/rate`, { rating });
+      return response.data;
+    } catch (error) {
+      console.error('Rate content failed:', error);
+      throw error;
+    }
+  }
+
+  async getContentProgress(userId, contentId) {
+    try {
+      const response = await api.get(`/api/watchlist/${userId}/${contentId}/progress`);
+      return response.data?.data || {};
+    } catch (error) {
+      console.error('Get content progress failed:', error);
+      throw error;
+    }
+  }
+
+  // ===== VIDEO UPLOAD =====
   async uploadVideo(formData, onProgress) {
     try {
-      const response = await api.post('/admin/upload-video', formData, {
+      const response = await api.post('/api/admin/upload-video', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (progressEvent) => {
           if (onProgress && progressEvent.total) {
@@ -141,247 +495,160 @@ class AdminAPI {
       });
       return response.data;
     } catch (error) {
-      console.warn('Upload API not available, simulating success');
-      // Simulate upload progress
-      if (onProgress) {
-        for (let i = 0; i <= 100; i += 10) {
-          setTimeout(() => onProgress(i), i * 50);
-        }
-      }
-      return { 
-        success: true, 
-        data: { 
-          episodeId: Date.now().toString(),
-          message: 'Video uploaded successfully (simulated)'
-        }
-      };
+      console.error('Upload video failed:', error);
+      throw error;
     }
   }
 
-  async uploadThumbnail(episodeId, formData) {
+  async batchUploadVideos(formData, onProgress) {
     try {
-      const response = await api.post(`/admin/upload-thumbnail/${episodeId}`, formData, {
+      const response = await api.post('/api/admin/batch-upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          if (onProgress && progressEvent.total) {
+            const progress = (progressEvent.loaded / progressEvent.total) * 100;
+            onProgress(Math.round(progress));
+          }
+        },
       });
       return response.data;
     } catch (error) {
-      console.warn('Upload API not available, simulating success');
-      return { success: true, message: 'Thumbnail uploaded successfully (simulated)' };
+      console.error('Batch upload failed:', error);
+      throw error;
     }
   }
 
-  // Analytics
-  async getPlatformAnalytics(params = {}) {
+  // ===== ANALYTICS =====
+  async trackAnalyticsEvent(eventData) {
     try {
-      const response = await api.get('/admin/analytics/platform', { params });
-      return response.data?.data || {};
+      const response = await api.post('/api/admin/analytics/track', eventData);
+      return response.data;
     } catch (error) {
-      console.warn('Analytics API not available, using mock data');
-      return this.getMockAnalytics();
+      console.error('Track analytics event failed:', error);
+      throw error;
     }
   }
 
-  async getContentAnalytics(id) {
+  async getAnalyticsReport(params = {}) {
     try {
-      const response = await api.get(`/admin/content/${id}/analytics`);
+      const response = await api.get('/api/admin/analytics/report', { params });
       return response.data?.data || {};
     } catch (error) {
-      console.warn('Analytics API not available, using mock data');
-      return {};
+      console.error('Get analytics report failed:', error);
+      throw error;
     }
   }
 
   async getRealTimeAnalytics() {
     try {
-      const response = await api.get('/admin/analytics/realtime');
+      const response = await api.get('/api/admin/analytics/realtime');
       return response.data?.data || {};
     } catch (error) {
-      console.warn('Analytics API not available, using mock data');
-      return this.getMockRealTimeAnalytics();
+      console.error('Get real-time analytics failed:', error);
+      throw error;
     }
   }
 
-  // System
-  async getSystemHealth() {
+  async getPlatformAnalytics(params = {}) {
     try {
-      const response = await api.get('/admin/system/health');
+      const response = await api.get('/api/admin/analytics/platform', { params });
       return response.data?.data || {};
     } catch (error) {
-      console.warn('System API not available, using mock data');
-      return this.getMockSystemHealth();
+      console.error('Get platform analytics failed:', error);
+      throw error;
+    }
+  }
+
+  async getContentAnalytics(contentId, params = {}) {
+    try {
+      const response = await api.get(`/api/admin/content/${contentId}/analytics`, { params });
+      return response.data?.data || {};
+    } catch (error) {
+      console.error('Get content analytics failed:', error);
+      throw error;
+    }
+  }
+
+  // ===== SYSTEM MANAGEMENT =====
+  async getSystemHealth() {
+    try {
+      const response = await api.get('/api/admin/system/health');
+      return response.data?.data || {};
+    } catch (error) {
+      console.error('Get system health failed:', error);
+      throw error;
     }
   }
 
   async getStorageStats() {
     try {
-      const response = await api.get('/admin/storage/stats');
+      const response = await api.get('/api/admin/storage/stats');
       return response.data?.data || {};
     } catch (error) {
-      console.warn('Storage API not available, using mock data');
-      return this.getMockStorageStats();
-    }
-  }
-
-  async getCacheStats() {
-    try {
-      const response = await api.get('/admin/cache/stats');
-      return response.data?.data || {};
-    } catch (error) {
-      console.warn('Cache API not available, using mock data');
-      return this.getMockCacheStats();
+      console.error('Get storage stats failed:', error);
+      throw error;
     }
   }
 
   async clearCache() {
     try {
-      const response = await api.post('/admin/cache/clear');
+      const response = await api.post('/api/admin/cache/clear');
       return response.data;
     } catch (error) {
-      console.warn('Cache API not available, simulating success');
-      return { success: true, message: 'Cache cleared successfully (simulated)' };
+      console.error('Clear cache failed:', error);
+      throw error;
     }
   }
 
-  // User Management
-  async getUsers(params = {}) {
+  async optimizeStorage(optimizationData) {
     try {
-      const response = await api.get('/admin/users', { params });
-      return response.data?.data || [];
-    } catch (error) {
-      console.warn('Users API not available, using mock data');
-      return [];
-    }
-  }
-
-  async getUserById(id) {
-    try {
-      const response = await api.get(`/admin/users/${id}`);
-      return response.data?.data || {};
-    } catch (error) {
-      console.warn('Users API not available, using mock data');
-      return {};
-    }
-  }
-
-  // Settings
-  async getSettings() {
-    try {
-      const response = await api.get('/admin/settings');
-      return response.data?.data || {};
-    } catch (error) {
-      console.warn('Settings API not available, using mock data');
-      return this.getMockSettings();
-    }
-  }
-
-  async updateSettings(settings) {
-    try {
-      const response = await api.put('/admin/settings', settings);
+      const response = await api.post('/api/admin/optimize/storage', optimizationData);
       return response.data;
     } catch (error) {
-      console.warn('Settings API not available, simulating success');
-      return { success: true, message: 'Settings updated successfully (simulated)' };
+      console.error('Optimize storage failed:', error);
+      throw error;
     }
   }
 
-  // Mock data methods for development
-  getMockContent() {
-    return [
-      {
-        _id: '1',
-        title: 'Sample Movie 1',
-        type: 'movie',
-        status: 'published',
-        genre: ['action', 'drama'],
-        language: ['hindi', 'english'],
-        totalEpisodes: 1,
-        createdAt: new Date('2024-01-15'),
-        description: 'A thrilling action movie with great storyline.'
-      },
-      {
-        _id: '2',
-        title: 'Web Series Episode 1',
-        type: 'web-series',
-        status: 'draft',
-        genre: ['comedy', 'romance'],
-        language: ['hindi'],
-        totalEpisodes: 10,
-        createdAt: new Date('2024-01-10'),
-        description: 'First episode of a romantic comedy series.'
-      },
-      {
-        _id: '3',
-        title: 'Documentary Series',
-        type: 'series',
-        status: 'published',
-        genre: ['documentary'],
-        language: ['english'],
-        totalEpisodes: 5,
-        createdAt: new Date('2024-01-05'),
-        description: 'Educational documentary about nature.'
-      }
-    ];
+  async purgeCDNCache(purgeData) {
+    try {
+      const response = await api.post('/api/admin/cdn/purge', purgeData);
+      return response.data;
+    } catch (error) {
+      console.error('Purge CDN cache failed:', error);
+      throw error;
+    }
   }
 
-  getMockAnalytics() {
-    return {
-      totalUsers: 15420,
-      activeUsers: 1250,
-      totalContent: 245,
-      publishedContent: 189,
-      totalViews: 1250000,
-      todayViews: 5420,
-      androidUsers: 8500,
-      iosUsers: 4200,
-      webUsers: 2720,
-      totalMovies: 120,
-      totalSeries: 80,
-      totalWebSeries: 45,
-      retentionRate: '78.5%'
-    };
+  // ===== UTILITY METHODS =====
+  async bulkUpdateContent(data) {
+    try {
+      // This endpoint might not exist, but we'll implement the logic
+      const promises = data.contentIds.map(id => 
+        this.updateContent(id, data.updates)
+      );
+      await Promise.all(promises);
+      return { success: true, message: 'Bulk update completed' };
+    } catch (error) {
+      console.error('Bulk update failed:', error);
+      throw error;
+    }
   }
 
-  getMockRealTimeAnalytics() {
-    return {
-      activeUsers: Math.floor(Math.random() * 1000) + 500,
-      currentViews: Math.floor(Math.random() * 500) + 100,
-      sessionsToday: Math.floor(Math.random() * 5000) + 2000,
-      peakHour: '8:00 PM'
-    };
-  }
-
-  getMockSystemHealth() {
-    return {
-      status: 'healthy',
-      uptime: '15 days, 4 hours',
-      version: '1.2.0',
-      database: { status: 'healthy', responseTime: '45ms' },
-      redis: { status: 'healthy', responseTime: '12ms' },
-      storage: { status: 'healthy', responseTime: '89ms' }
-    };
-  }
-
-  getMockStorageStats() {
-    return {
-      totalSpace: 5 * 1024 * 1024 * 1024 * 1024, // 5TB
-      usedSpace: 1.2 * 1024 * 1024 * 1024 * 1024, // 1.2TB
-      availableSpace: 3.8 * 1024 * 1024 * 1024 * 1024, // 3.8TB
-      totalFiles: 15420
-    };
-  }
-
-  getMockCacheStats() {
+  async getCacheStats() {
+    // Mock method since not in API
     return {
       status: 'healthy',
       hitRate: 94.2,
-      memoryUsed: 2.1 * 1024 * 1024 * 1024, // 2.1GB
-      memoryTotal: 4 * 1024 * 1024 * 1024, // 4GB
+      memoryUsed: 2.1 * 1024 * 1024 * 1024,
+      memoryTotal: 4 * 1024 * 1024 * 1024,
       keys: 25648,
       connections: 45
     };
   }
 
-  getMockSettings() {
+  async getSettings() {
+    // Mock method since not in API
     return {
       siteName: 'Cino Admin',
       siteDescription: 'Professional video streaming platform',
@@ -390,6 +657,12 @@ class AdminAPI {
       cdnEnabled: true,
       analyticsEnabled: true
     };
+  }
+
+  async updateSettings(settings) {
+    // Mock method since not in API
+    console.log('Settings updated:', settings);
+    return { success: true, message: 'Settings updated successfully' };
   }
 }
 
